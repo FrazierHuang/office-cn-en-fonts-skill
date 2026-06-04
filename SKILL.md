@@ -39,7 +39,7 @@ After creating or editing an Office file, run the bundled cleanup script when po
 python3 /path/to/office-cn-en-fonts-skill/scripts/enforce_office_fonts.py --in-place file.docx file.xlsx file.pptx
 ```
 
-Use `--in-place` for final artifacts. Without `--in-place`, the script writes a sibling file with `_fontfixed` before the extension.
+Use `--in-place` for final artifacts. Without `--in-place`, the script writes a sibling file with `_fontfixed` before the extension. Use `--backup` with `--in-place` when preserving originals matters. Use `--check` to audit files without modifying them. Use `--recursive` when the input is a folder.
 
 The script:
 
@@ -48,6 +48,14 @@ The script:
 - removes spaces between adjacent Chinese and English/numeric text in OOXML text nodes;
 - updates XLSX font colors, resets fills, and rewrites shared/inline strings into rich text runs split into Chinese and non-Chinese segments;
 - updates PPTX run/theme font declarations for Latin and East Asian text.
+- returns a non-zero exit code in `--check` mode if any file still has formatting issues.
+
+Examples:
+
+```bash
+python3 /path/to/office-cn-en-fonts-skill/scripts/enforce_office_fonts.py --check outputs
+python3 /path/to/office-cn-en-fonts-skill/scripts/enforce_office_fonts.py --recursive --in-place --backup outputs
+```
 
 ## Verification
 

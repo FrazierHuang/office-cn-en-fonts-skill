@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize Office OOXML fonts for Chinese/English mixed outputs."""
+"""Normalize and check Office OOXML fonts for Chinese-English mixed outputs."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import re
 import shutil
 import tempfile
 import zipfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -23,6 +24,7 @@ ET.register_namespace("a", A_NS)
 ET.register_namespace("", SS_NS)
 ET.register_namespace("r", R_NS)
 
+SUPPORTED_SUFFIXES = {".docx", ".xlsx", ".pptx"}
 CJK_RE = re.compile(r"([\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+)")
 CJK_CLASS = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
 WESTERN_CLASS = r"A-Za-z0-9"
@@ -31,20 +33,22 @@ CJK_WESTERN_SPACE_RE = re.compile(
 )
 
 
+@dataclass
+class CheckResult:
+    path: Path
+    issues: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return not self.issues
+
+    def add(self, key: str, count: int = 1) -> None:
+        if count:
+            self.issues[key] = self.issues.get(key, 0) + count
+
+
 def qn(ns: str, tag: str) -> str:
     return f"{{{ns}}}{tag}"
-
-
-def write_zip(src: Path, dst: Path, transform) -> None:
-    with zipfile.ZipFile(src, "r") as zin:
-        with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                new_data = transform(item.filename, data)
-                info = zipfile.ZipInfo(item.filename, item.date_time)
-                info.compress_type = zipfile.ZIP_DEFLATED
-                info.external_attr = item.external_attr
-                zout.writestr(info, new_data)
 
 
 def parse_xml(data: bytes):
@@ -71,6 +75,54 @@ def ensure_child(parent: ET.Element, tag: str, first: bool = False) -> ET.Elemen
 
 def normalize_text_spacing(text: str) -> str:
     return CJK_WESTERN_SPACE_RE.sub("", text)
+
+
+def count_spacing_issues(text: str) -> int:
+    return len(CJK_WESTERN_SPACE_RE.findall(text))
+
+
+def is_black_color(value: str | None) -> bool:
+    if value is None:
+        return False
+    value = value.upper().replace("#", "")
+    return value in {"000000", "FF000000"}
+
+
+def is_default_fill(fill: ET.Element) -> bool:
+    pattern = fill.find(qn(SS_NS, "patternFill"))
+    if pattern is None:
+        return False
+    children = list(pattern)
+    return pattern.get("patternType") in {"none", "gray125"} and not children
+
+
+def is_supported_office_file(path: Path) -> bool:
+    return path.suffix.lower() in SUPPORTED_SUFFIXES and ".backup" not in path.stem
+
+
+def walk_office_files(paths: list[Path], recursive: bool) -> list[Path]:
+    files: list[Path] = []
+    for path in paths:
+        if path.is_dir():
+            iterator = path.rglob("*") if recursive else path.iterdir()
+            files.extend(p for p in iterator if p.is_file() and is_supported_office_file(p))
+        elif path.is_file() and is_supported_office_file(path):
+            files.append(path)
+        else:
+            raise ValueError(f"Unsupported path or file type: {path}")
+    return sorted(dict.fromkeys(files))
+
+
+def write_zip(src: Path, dst: Path, transform) -> None:
+    with zipfile.ZipFile(src, "r") as zin:
+        with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                new_data = transform(item.filename, data)
+                info = zipfile.ZipInfo(item.filename, item.date_time)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = item.external_attr
+                zout.writestr(info, new_data)
 
 
 def normalize_word(data: bytes) -> bytes:
@@ -116,6 +168,36 @@ def set_word_run_props(rpr: ET.Element) -> None:
         color.attrib.pop(attr, None)
 
 
+def check_word_xml(data: bytes, result: CheckResult) -> None:
+    root = parse_xml(data)
+    if root is None:
+        return
+
+    for text_node in root.iter(qn(W_NS, "t")):
+        if text_node.text:
+            result.add("spacing", count_spacing_issues(text_node.text))
+
+    for rpr in root.iter(qn(W_NS, "rPr")):
+        rfonts = rpr.find(qn(W_NS, "rFonts"))
+        if rfonts is None:
+            result.add("word_font_missing")
+        else:
+            if rfonts.get(qn(W_NS, "eastAsia")) not in {"宋体", "SimSun"}:
+                result.add("word_chinese_font")
+            for attr in ("ascii", "hAnsi", "cs"):
+                if rfonts.get(qn(W_NS, attr)) != "Times New Roman":
+                    result.add("word_english_font")
+                    break
+        color = rpr.find(qn(W_NS, "color"))
+        if color is None or not is_black_color(color.get(qn(W_NS, "val"))):
+            result.add("word_color")
+
+    for tcpr in root.iter(qn(W_NS, "tcPr")):
+        result.add("word_table_fill", len(tcpr.findall(qn(W_NS, "shd"))))
+    for tblpr in root.iter(qn(W_NS, "tblPr")):
+        result.add("word_table_fill", len(tblpr.findall(qn(W_NS, "shd"))))
+
+
 def normalize_xlsx_styles(data: bytes) -> bytes:
     root = parse_xml(data)
     if root is None:
@@ -146,6 +228,35 @@ def normalize_xlsx_styles(data: bytes) -> bytes:
                 xf.attrib.pop("applyFill", None)
 
     return xml_bytes(root)
+
+
+def check_xlsx_styles(data: bytes, result: CheckResult) -> None:
+    root = parse_xml(data)
+    if root is None:
+        return
+
+    fonts = root.find(qn(SS_NS, "fonts"))
+    if fonts is not None:
+        for font in fonts.findall(qn(SS_NS, "font")):
+            name = font.find(qn(SS_NS, "name"))
+            if name is None or name.get("val") != "Times New Roman":
+                result.add("xlsx_font")
+            color = font.find(qn(SS_NS, "color"))
+            if color is None or not is_black_color(color.get("rgb")):
+                result.add("xlsx_color")
+
+    fills = root.find(qn(SS_NS, "fills"))
+    if fills is not None:
+        for fill in fills.findall(qn(SS_NS, "fill")):
+            if not is_default_fill(fill):
+                result.add("xlsx_fill")
+
+    for xf_parent_name in ("cellXfs", "cellStyleXfs"):
+        xf_parent = root.find(qn(SS_NS, xf_parent_name))
+        if xf_parent is not None:
+            for xf in xf_parent.findall(qn(SS_NS, "xf")):
+                if xf.get("fillId") not in {None, "0"}:
+                    result.add("xlsx_fill")
 
 
 def rich_text_runs(text: str) -> list[ET.Element]:
@@ -180,6 +291,29 @@ def normalize_shared_strings(data: bytes) -> bytes:
             si.append(run)
 
     return xml_bytes(root)
+
+
+def check_spreadsheet_strings(data: bytes, result: CheckResult) -> None:
+    root = parse_xml(data)
+    if root is None:
+        return
+
+    for text_node in root.iter(qn(SS_NS, "t")):
+        if text_node.text:
+            result.add("spacing", count_spacing_issues(text_node.text))
+
+    for run in root.iter(qn(SS_NS, "r")):
+        text = "".join(t.text or "" for t in run.iter(qn(SS_NS, "t")))
+        if not text:
+            continue
+        rpr = run.find(qn(SS_NS, "rPr"))
+        rfont = rpr.find(qn(SS_NS, "rFont")) if rpr is not None else None
+        color = rpr.find(qn(SS_NS, "color")) if rpr is not None else None
+        expected = "宋体" if CJK_RE.fullmatch(text) else "Times New Roman"
+        if rfont is None or rfont.get("val") != expected:
+            result.add("xlsx_rich_text_font")
+        if color is None or not is_black_color(color.get("rgb")):
+            result.add("xlsx_rich_text_color")
 
 
 def normalize_sheet(data: bytes) -> bytes:
@@ -234,6 +368,27 @@ def set_drawing_fonts(rpr: ET.Element) -> None:
     cs.set("typeface", "Times New Roman")
 
 
+def check_pptx_xml(data: bytes, result: CheckResult) -> None:
+    root = parse_xml(data)
+    if root is None:
+        return
+
+    for text_node in root.iter(qn(A_NS, "t")):
+        if text_node.text:
+            result.add("spacing", count_spacing_issues(text_node.text))
+
+    for rpr in list(root.iter(qn(A_NS, "rPr"))) + list(root.iter(qn(A_NS, "defRPr"))):
+        latin = rpr.find(qn(A_NS, "latin"))
+        ea = rpr.find(qn(A_NS, "ea"))
+        cs = rpr.find(qn(A_NS, "cs"))
+        if latin is None or latin.get("typeface") != "Times New Roman":
+            result.add("pptx_english_font")
+        if ea is None or ea.get("typeface") not in {"宋体", "SimSun"}:
+            result.add("pptx_chinese_font")
+        if cs is None or cs.get("typeface") != "Times New Roman":
+            result.add("pptx_complex_font")
+
+
 def transform_docx(name: str, data: bytes) -> bytes:
     if name.startswith("word/") and name.endswith(".xml"):
         return normalize_word(data)
@@ -257,6 +412,27 @@ def transform_pptx(name: str, data: bytes) -> bytes:
     return data
 
 
+def check_file(path: Path) -> CheckResult:
+    result = CheckResult(path)
+    with zipfile.ZipFile(path, "r") as archive:
+        for name in archive.namelist():
+            data = archive.read(name)
+            suffix = path.suffix.lower()
+            if suffix == ".docx" and name.startswith("word/") and name.endswith(".xml"):
+                check_word_xml(data, result)
+            elif suffix == ".xlsx" and name == "xl/styles.xml":
+                check_xlsx_styles(data, result)
+            elif suffix == ".xlsx" and (
+                name == "xl/sharedStrings.xml" or name.startswith("xl/worksheets/") and name.endswith(".xml")
+            ):
+                check_spreadsheet_strings(data, result)
+            elif suffix == ".pptx" and name.endswith(".xml") and name.startswith(
+                ("ppt/slides/", "ppt/slideLayouts/", "ppt/slideMasters/", "ppt/theme/", "ppt/notesSlides/")
+            ):
+                check_pptx_xml(data, result)
+    return result
+
+
 def output_path(path: Path, in_place: bool) -> Path:
     if in_place:
         fd, tmp_name = tempfile.mkstemp(suffix=path.suffix)
@@ -266,7 +442,19 @@ def output_path(path: Path, in_place: bool) -> Path:
     return path.with_name(f"{path.stem}_fontfixed{path.suffix}")
 
 
-def normalize_file(path: Path, in_place: bool) -> Path:
+def backup_path(path: Path) -> Path:
+    candidate = path.with_name(f"{path.stem}.backup{path.suffix}")
+    if not candidate.exists():
+        return candidate
+    index = 2
+    while True:
+        candidate = path.with_name(f"{path.stem}.backup{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def normalize_file(path: Path, in_place: bool, backup: bool) -> Path:
     suffix = path.suffix.lower()
     if suffix == ".docx":
         transform = transform_docx
@@ -277,6 +465,9 @@ def normalize_file(path: Path, in_place: bool) -> Path:
     else:
         raise ValueError(f"Unsupported file type: {path}")
 
+    if backup and in_place:
+        shutil.copy2(path, backup_path(path))
+
     dst = output_path(path, in_place)
     write_zip(path, dst, transform)
     if in_place:
@@ -285,15 +476,37 @@ def normalize_file(path: Path, in_place: bool) -> Path:
     return dst
 
 
+def print_check_result(result: CheckResult) -> None:
+    if result.ok:
+        print(f"PASS {result.path}")
+        return
+    print(f"FAIL {result.path}")
+    for key, count in sorted(result.issues.items()):
+        print(f"  - {key}: {count}")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Enforce Chinese/English fonts in Office OOXML files.")
-    parser.add_argument("files", nargs="+", type=Path, help="Office files: .docx, .xlsx, .pptx")
+    parser = argparse.ArgumentParser(description="Enforce or check Chinese/English fonts in Office OOXML files.")
+    parser.add_argument("paths", nargs="+", type=Path, help="Office files or folders containing .docx, .xlsx, .pptx")
     parser.add_argument("--in-place", action="store_true", help="Overwrite input files after successful rewrite")
+    parser.add_argument("--backup", action="store_true", help="Create .backup files before in-place rewrites")
+    parser.add_argument("--check", action="store_true", help="Check files and return non-zero when issues are found")
+    parser.add_argument("--recursive", action="store_true", help="Process Office files inside folders recursively")
     args = parser.parse_args()
 
-    for file_path in args.files:
-        result = normalize_file(file_path, args.in_place)
-        print(result)
+    if args.backup and not args.in_place:
+        parser.error("--backup requires --in-place")
+
+    files = walk_office_files(args.paths, args.recursive)
+    if args.check:
+        results = [check_file(file_path) for file_path in files]
+        for result in results:
+            print_check_result(result)
+        return 0 if all(result.ok for result in results) else 1
+
+    for file_path in files:
+        result = normalize_file(file_path, args.in_place, args.backup)
+        print(f"OK   {result}")
     return 0
 
 

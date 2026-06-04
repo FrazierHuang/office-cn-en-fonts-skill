@@ -1,3 +1,9 @@
 .DS_Store
 __pycache__/
 *.pyc
+*_fontfixed.docx
+*_fontfixed.xlsx
+*_fontfixed.pptx
+*.backup.docx
+*.backup.xlsx
+*.backup.pptx
