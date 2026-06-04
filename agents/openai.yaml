@@ -1,0 +1,4 @@
+interface:
+  display_name: "Office 中文英文格式"
+  short_description: "生成或整理 Word、Excel、PPT 时统一中英文字体和中英文连接格式。"
+  default_prompt: "生成或整理 Office 文件，并统一中文宋体、英文 Times New Roman；中英文相连处不要空格；Word 和 Excel 保持黑色字体，表格无填充颜色。"
