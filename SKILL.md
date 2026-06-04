@@ -1,9 +1,9 @@
 ---
-name: office-cn-en-fonts
+name: office-cn-en-fonts-skill
 description: Enforce Office output typography and spacing for Chinese/English mixed documents. Use when Codex creates, edits, formats, or post-processes Word (.docx), Excel (.xlsx), or PowerPoint (.pptx) files and the output must use SimSun/宋体 for Chinese text and Times New Roman for English text, with no spaces between adjacent Chinese and English text; for Word and Excel outputs, all font color must be black and tables must have no fill/shading color.
 ---
 
-# Office Chinese/English Fonts
+# Office Chinese/English Fonts Skill
 
 ## Core Rules
 
@@ -36,7 +36,7 @@ When creating new files, set formatting during generation instead of relying onl
 After creating or editing an Office file, run the bundled cleanup script when possible:
 
 ```bash
-python3 /path/to/office-cn-en-fonts/scripts/enforce_office_fonts.py --in-place file.docx file.xlsx file.pptx
+python3 /path/to/office-cn-en-fonts-skill/scripts/enforce_office_fonts.py --in-place file.docx file.xlsx file.pptx
 ```
 
 Use `--in-place` for final artifacts. Without `--in-place`, the script writes a sibling file with `_fontfixed` before the extension.

@@ -1,4 +1,4 @@
-# office-cn-en-fonts
+# office-cn-en-fonts-skill
 
 用于 Codex 的 Office 输出格式控制 skill。它要求生成或后处理 Word、Excel、PowerPoint 文件时统一中英文字体，并约束 Word/Excel 的基础表格样式。
 
@@ -16,7 +16,7 @@
 将整个目录复制到 Codex skills 目录：
 
 ```bash
-cp -R office-cn-en-fonts ~/.codex/skills/
+cp -R office-cn-en-fonts-skill ~/.codex/skills/
 ```
 
 复制后重新打开 Codex 会话，让新 skill 被加载。
@@ -26,7 +26,7 @@ cp -R office-cn-en-fonts ~/.codex/skills/
 当你要求 Codex 生成或整理 Office 文件时，可以直接提出类似需求：
 
 ```text
-帮我生成一个 Word 文档，使用 office-cn-en-fonts 的格式要求。
+帮我生成一个 Word 文档，使用 office-cn-en-fonts-skill 的格式要求。
 ```
 
 或：
@@ -54,7 +54,7 @@ python3 scripts/enforce_office_fonts.py --in-place file.docx file.xlsx file.pptx
 ## 文件结构
 
 ```text
-office-cn-en-fonts/
+office-cn-en-fonts-skill/
 ├── SKILL.md
 ├── agents/
 │   └── openai.yaml
