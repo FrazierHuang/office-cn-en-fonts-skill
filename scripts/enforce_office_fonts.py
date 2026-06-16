@@ -81,6 +81,88 @@ def count_spacing_issues(text: str) -> int:
     return len(CJK_WESTERN_SPACE_RE.findall(text))
 
 
+def is_cjk_char(char: str) -> bool:
+    return bool(re.fullmatch(f"[{CJK_CLASS}]", char))
+
+
+def is_western_char(char: str) -> bool:
+    return bool(re.fullmatch(f"[{WESTERN_CLASS}]", char))
+
+
+def is_cjk_western_boundary(left: str, right: str) -> bool:
+    return (is_cjk_char(left) and is_western_char(right)) or (is_western_char(left) and is_cjk_char(right))
+
+
+def first_nonspace(text: str) -> str | None:
+    stripped = text.lstrip()
+    return stripped[0] if stripped else None
+
+
+def last_nonspace(text: str) -> str | None:
+    stripped = text.rstrip()
+    return stripped[-1] if stripped else None
+
+
+def normalize_spacing_across_text_nodes(root: ET.Element, text_tag: str) -> None:
+    last_sig_node: ET.Element | None = None
+    last_sig_char: str | None = None
+    space_nodes: list[ET.Element] = []
+
+    for text_node in root.iter(text_tag):
+        if text_node.text is None:
+            continue
+
+        text_node.text = normalize_text_spacing(text_node.text)
+        current_first = first_nonspace(text_node.text)
+
+        if current_first is None:
+            if last_sig_node is not None and text_node.text:
+                space_nodes.append(text_node)
+            continue
+
+        if last_sig_node is not None and last_sig_char is not None and is_cjk_western_boundary(last_sig_char, current_first):
+            last_sig_node.text = (last_sig_node.text or "").rstrip()
+            for space_node in space_nodes:
+                space_node.text = ""
+            text_node.text = text_node.text.lstrip()
+
+        current_last = last_nonspace(text_node.text)
+        if current_last is not None:
+            last_sig_node = text_node
+            last_sig_char = current_last
+            space_nodes = []
+
+
+def count_spacing_issues_across_text_nodes(root: ET.Element, text_tag: str) -> int:
+    issues = 0
+    last_sig_char: str | None = None
+    pending_space = False
+
+    for text_node in root.iter(text_tag):
+        text = text_node.text
+        if text is None:
+            continue
+
+        issues += count_spacing_issues(text)
+        current_first = first_nonspace(text)
+
+        if current_first is None:
+            if last_sig_char is not None and text:
+                pending_space = True
+            continue
+
+        if last_sig_char is not None and is_cjk_western_boundary(last_sig_char, current_first):
+            if pending_space or text[:1].isspace():
+                issues += 1
+
+        current_last = last_nonspace(text)
+        if current_last is not None:
+            last_sig_char = current_last
+            pending_space = bool(text[-1:].isspace())
+
+    return issues
+
+
 def is_black_color(value: str | None) -> bool:
     if value is None:
         return False
@@ -137,9 +219,7 @@ def normalize_word(data: bytes) -> bytes:
             run.insert(0, rpr)
         set_word_run_props(rpr)
 
-    for text_node in root.iter(qn(W_NS, "t")):
-        if text_node.text:
-            text_node.text = normalize_text_spacing(text_node.text)
+    normalize_spacing_across_text_nodes(root, qn(W_NS, "t"))
 
     for rpr in root.iter(qn(W_NS, "rPr")):
         set_word_run_props(rpr)
@@ -173,9 +253,7 @@ def check_word_xml(data: bytes, result: CheckResult) -> None:
     if root is None:
         return
 
-    for text_node in root.iter(qn(W_NS, "t")):
-        if text_node.text:
-            result.add("spacing", count_spacing_issues(text_node.text))
+    result.add("spacing", count_spacing_issues_across_text_nodes(root, qn(W_NS, "t")))
 
     for rpr in root.iter(qn(W_NS, "rPr")):
         rfonts = rpr.find(qn(W_NS, "rFonts"))
@@ -348,9 +426,7 @@ def normalize_pptx_xml(data: bytes) -> bytes:
     for defrpr in root.iter(qn(A_NS, "defRPr")):
         set_drawing_fonts(defrpr)
 
-    for text_node in root.iter(qn(A_NS, "t")):
-        if text_node.text:
-            text_node.text = normalize_text_spacing(text_node.text)
+    normalize_spacing_across_text_nodes(root, qn(A_NS, "t"))
 
     for tag in ("latin", "ea", "cs"):
         for elem in root.iter(qn(A_NS, tag)):
@@ -373,9 +449,7 @@ def check_pptx_xml(data: bytes, result: CheckResult) -> None:
     if root is None:
         return
 
-    for text_node in root.iter(qn(A_NS, "t")):
-        if text_node.text:
-            result.add("spacing", count_spacing_issues(text_node.text))
+    result.add("spacing", count_spacing_issues_across_text_nodes(root, qn(A_NS, "t")))
 
     for rpr in list(root.iter(qn(A_NS, "rPr"))) + list(root.iter(qn(A_NS, "defRPr"))):
         latin = rpr.find(qn(A_NS, "latin"))

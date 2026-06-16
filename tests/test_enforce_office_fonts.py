@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
+from xml.etree import ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,7 @@ def make_docx(path: Path) -> None:
         )
         archive.writestr(
             "word/document.xml",
-            """<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr><w:tc><w:tcPr><w:shd w:fill="FFFF00"/></w:tcPr><w:p><w:r><w:t>河蚬 As 暴露</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>""",
+            """<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr><w:tc><w:tcPr><w:shd w:fill="FFFF00"/></w:tcPr><w:p><w:r><w:t>河蚬 As 暴露</w:t></w:r></w:p><w:p><w:r><w:t>贝类</w:t></w:r><w:r><w:t> </w:t></w:r><w:r><w:t>As</w:t></w:r><w:r><w:t> 暴露</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>""",
         )
 
 
@@ -54,7 +55,7 @@ def make_pptx(path: Path) -> None:
         )
         archive.writestr(
             "ppt/slides/slide1.xml",
-            """<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:rPr/><a:t>河蚬 As 暴露</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>""",
+            """<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:rPr/><a:t>河蚬 As 暴露</a:t></a:r></a:p><a:p><a:r><a:rPr/><a:t>贝类</a:t></a:r><a:r><a:rPr/><a:t> </a:t></a:r><a:r><a:rPr/><a:t>As</a:t></a:r><a:r><a:rPr/><a:t> 暴露</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>""",
         )
 
 
@@ -93,10 +94,25 @@ class OfficeFontScriptTest(unittest.TestCase):
 
         with ZipFile(self.tmp / "sample.docx") as archive:
             text = archive.read("word/document.xml").decode("utf-8")
+        docx_root = ET.fromstring(text)
+        docx_joined_text = "".join(node.text or "" for node in docx_root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"))
         self.assertIn("河蚬As暴露", text)
+        self.assertIn("贝类As暴露", docx_joined_text)
+        self.assertNotIn("<w:t> </w:t>", text)
+        self.assertNotIn("<w:t> As", text)
+        self.assertNotIn("<w:t> 暴露", text)
         self.assertIn("Times New Roman", text)
         self.assertIn("宋体", text)
         self.assertNotIn("FFFF00", text)
+
+        with ZipFile(self.tmp / "sample.pptx") as archive:
+            slide_text = archive.read("ppt/slides/slide1.xml").decode("utf-8")
+        slide_root = ET.fromstring(slide_text)
+        slide_joined_text = "".join(node.text or "" for node in slide_root.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}t"))
+        self.assertIn("贝类As暴露", slide_joined_text)
+        self.assertNotIn("<a:t> </a:t>", slide_text)
+        self.assertNotIn("<a:t> As", slide_text)
+        self.assertNotIn("<a:t> 暴露", slide_text)
 
     def test_non_in_place_writes_fontfixed_file(self) -> None:
         result = self.run_script(str(self.tmp / "sample.docx"))

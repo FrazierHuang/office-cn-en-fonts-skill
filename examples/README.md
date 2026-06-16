@@ -4,7 +4,7 @@ This folder contains tiny Office OOXML fixtures that show the cleanup workflow.
 
 ## Files
 
-- `before/`: intentionally messy examples with Chinese-English spaces, Word/Excel fill colors, and non-normalized fonts.
+- `before/`: intentionally messy examples with Chinese-English spaces, split Word/PPT runs, Word/Excel fill colors, and non-normalized fonts.
 - `after/`: the same files after running `scripts/enforce_office_fonts.py`.
 
 ## Reproduce

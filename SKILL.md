@@ -15,6 +15,7 @@ Apply these rules to every generated Office artifact unless the user explicitly 
 - Word and Excel: remove table or cell fill colors; tables must use no shading/fill.
 - PowerPoint: enforce the Chinese/English font pairing, but do not force black text unless the user asks.
 - Remove spaces between adjacent Chinese and English/numeric text, e.g. write `河蚬As` and `As暴露`, not `河蚬 As` or `As 暴露`.
+- For Word and PowerPoint, remove those boundary spaces even when the phrase is split across multiple runs/text nodes.
 
 ## Creation Workflow
 
@@ -45,7 +46,7 @@ The script:
 
 - updates DOCX run/style fonts and forces black Word text;
 - removes DOCX table-cell shading;
-- removes spaces between adjacent Chinese and English/numeric text in OOXML text nodes;
+- removes spaces between adjacent Chinese and English/numeric text inside and across OOXML text nodes;
 - updates XLSX font colors, resets fills, and rewrites shared/inline strings into rich text runs split into Chinese and non-Chinese segments;
 - updates PPTX run/theme font declarations for Latin and East Asian text.
 - returns a non-zero exit code in `--check` mode if any file still has formatting issues.

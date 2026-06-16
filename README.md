@@ -23,6 +23,7 @@ This repository packages those rules as both a Codex skill and a command-line cl
 - Remove spaces between adjacent Chinese and English/numeric text, for example:
   - `河蚬 As` -> `河蚬As`
   - `As 暴露` -> `As暴露`
+- Remove those boundary spaces even when Word or PowerPoint splits the phrase across multiple text runs.
 - Force black text in Word and Excel.
 - Remove table/cell fill colors in Word and Excel.
 - Normalize `.docx`, `.xlsx`, and `.pptx` files in place or as new files.
